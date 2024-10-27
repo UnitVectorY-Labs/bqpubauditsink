@@ -11,21 +11,21 @@
  * or implied. See the License for the specific language governing permissions and limitations under
  * the License.
  */
-package com.unitvectory.bqpubauditsink;
+package com.unitvectory.bqpubauditsink.model;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.ComponentScan;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /**
- * The Spring Boot 3 app for the bqpubauditsink Cloud Run application.
+ * The PubSubPublish class.
  * 
  * @author Jared Hatfield (UnitVectorY Labs)
  */
-@SpringBootApplication
-@ComponentScan(basePackages = {"com.unitvectory.bqpubauditsink"})
-public class App {
-  public static void main(String[] args) {
-    SpringApplication.run(App.class, args);
-  }
+@Data
+@NoArgsConstructor
+public class PubSubPublish {
+
+    private PubSubMessage message;
+
+    private String subscription;
 }
