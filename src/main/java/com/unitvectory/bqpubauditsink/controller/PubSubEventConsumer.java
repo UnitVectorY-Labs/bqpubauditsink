@@ -14,16 +14,13 @@
 package com.unitvectory.bqpubauditsink.controller;
 
 import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
 
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+ 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.unitvectory.bqpubauditsink.model.PubSubPublish;
 import com.unitvectory.bqpubauditsink.service.BigQueryService;
@@ -44,43 +41,40 @@ public class PubSubEventConsumer {
 
     @PostMapping(value = "/pubsub", consumes = "application/json")
     public void handleFirestoreEvent(@RequestBody PubSubPublish data) throws InvalidProtocolBufferException {
-
         // Decode the Base64 encoded message data
         String jsonString = new String(Base64.getDecoder().decode(data.getMessage().getData()));
 
-        // Parse the decoded string into a JsonObject
-        JsonObject jsonObject = JsonParser.parseString(jsonString).getAsJsonObject();
+        // Parse the decoded string into a JSONObject
+        JSONObject jsonObject = new JSONObject(jsonString);
 
-        // Extract fields from the JsonObject
-        String timestamp = jsonObject.has("timestamp") ? jsonObject.get("timestamp").getAsString() : null;
-        String database = jsonObject.has("database") ? jsonObject.get("database").getAsString() : null;
-        String documentPath = jsonObject.has("documentPath") ? jsonObject.get("documentPath").getAsString() : null;
+        // Extract required fields
+        String timestamp = jsonObject.optString("timestamp", null);
+        String database = jsonObject.optString("database", null);
+        String documentPath = jsonObject.optString("documentPath", null);
 
-        // These fields are required, if one is missing, skip the record
-        if (timestamp == null) {
-            log.warn("Timestamp is missing, skipping record.");
-            return;
-        } else if (database == null) {
-            log.warn("Database is missing, skipping record.");
-            return;
-        } else if (documentPath == null) {
-            log.warn("Document path is missing, skipping record.");
+        if (timestamp == null || database == null || documentPath == null) {
+            log.warn("Missing required fields, skipping record.");
             return;
         }
 
-        JsonObject value = jsonObject.has("value") ? jsonObject.getAsJsonObject("value") : null;
-        JsonObject oldValue = jsonObject.has("oldValue") ? jsonObject.getAsJsonObject("oldValue") : null;
+        JSONObject value = jsonObject.optJSONObject("value");
+        JSONObject oldValue = jsonObject.optJSONObject("oldValue");
 
-        // Create a Map to hold the row content
-        Map<String, Object> rowContent = new HashMap<>();
-        rowContent.put("timestamp", timestamp);
-        rowContent.put("database", database);
-        rowContent.put("documentPath", documentPath);
-        rowContent.put("value", value != null ? value.toString() : null);
-        rowContent.put("oldValue", oldValue != null ? oldValue.toString() : null);
-        rowContent.put("tombstone", value == null);
+        // Prepare the JSON object for BigQuery
+        JSONObject record = new JSONObject();
+        record.put("timestamp", timestamp);
+        record.put("database", database);
+        record.put("documentPath", documentPath);
+        record.put("value", value != null ? value.toString() : null);
+        record.put("oldValue", oldValue != null ? oldValue.toString() : null);
+        record.put("tombstone", value == null);
 
-        // Insert the record
-        this.bigQueryService.insert(rowContent);
+        // Insert the record into BigQuery
+        try {
+            this.bigQueryService.insert(record);
+        } catch (Exception e) {
+            log.error("Failed to insert record into BigQuery", e);
+            return;
+        } 
     }
 }

@@ -13,18 +13,29 @@
  */
 package com.unitvectory.bqpubauditsink.service;
 
-import java.util.Map;
+import java.io.IOException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Phaser;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.threeten.bp.Duration;
 
-import com.google.cloud.bigquery.BigQuery;
-import com.google.cloud.bigquery.BigQueryOptions;
-import com.google.cloud.bigquery.InsertAllRequest;
-import com.google.cloud.bigquery.InsertAllResponse;
-import com.google.cloud.bigquery.TableId;
+import com.google.api.core.ApiFuture;
+import com.google.api.core.ApiFutureCallback;
+import com.google.api.core.ApiFutures;
+import com.google.api.gax.core.FixedExecutorProvider;
+import com.google.api.gax.retrying.RetrySettings;
+import com.google.cloud.bigquery.storage.v1.AppendRowsResponse;
+import com.google.cloud.bigquery.storage.v1.BigQueryWriteClient;
+import com.google.cloud.bigquery.storage.v1.JsonStreamWriter;
+import com.google.cloud.bigquery.storage.v1.TableName;
+import com.google.common.util.concurrent.MoreExecutors;
+import com.google.protobuf.Descriptors.DescriptorValidationException;
 
-import lombok.extern.slf4j.Slf4j;
+import javax.annotation.PreDestroy;
 
 /**
  * The BigQuery Service
@@ -32,36 +43,68 @@ import lombok.extern.slf4j.Slf4j;
  * @author Jared Hatfield (UnitVectorY Labs)
  */
 @Service
-@Slf4j
 public class BigQueryService {
 
-    private final BigQuery bigQuery;
+    private final BigQueryWriteClient client;
+    private final JsonStreamWriter streamWriter;
+    private final TableName parentTable;
 
-    private final TableId tableId;
+    private final Phaser inflightRequestCount = new Phaser(1);
 
     public BigQueryService(@Value("${project.id}") String projectId,
             @Value("${dataset.name}") String datasetName,
-            @Value("${table.name}") String tableName) {
-        this.bigQuery = BigQueryOptions.newBuilder().setProjectId(projectId).build().getService();
-        this.tableId = TableId.of(datasetName, tableName);
+            @Value("${table.name}") String tableName) throws DescriptorValidationException, IOException {
+        this.client = BigQueryWriteClient.create();
+        this.parentTable = TableName.of(projectId, datasetName, tableName);
+        this.streamWriter = createStreamWriter(parentTable.toString());
     }
 
-    public void insert(Map<String, Object> rowContent) {
-        
-        // Insert the data into BigQuery
-        InsertAllRequest insertRequest = InsertAllRequest.newBuilder(tableId)
-                .addRow(rowContent)
+    private JsonStreamWriter createStreamWriter(String tableName) throws DescriptorValidationException, IOException {
+        RetrySettings retrySettings = RetrySettings.newBuilder()
+                .setInitialRetryDelay(Duration.ofMillis(500))
+                .setRetryDelayMultiplier(1.1)
+                .setMaxAttempts(5)
+                .setMaxRetryDelay(Duration.ofMinutes(1))
                 .build();
 
-        InsertAllResponse insertResponse = bigQuery.insertAll(insertRequest);
+        // Using the default stream for the specified table
+        try {
+            return JsonStreamWriter.newBuilder(tableName, client)
+                    .setExecutorProvider(FixedExecutorProvider.create(Executors.newScheduledThreadPool(100)))
+                    .setRetrySettings(retrySettings)
+                    .build();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-        // Check for insertion errors
-        if (insertResponse.hasErrors()) {
-            insertResponse.getInsertErrors().forEach((id, errors) -> {
-            errors.forEach(error -> log.error("Error: " + error.getMessage()));
-            });
-        } else {
-            log.info("Data inserted successfully.");
+    public void insert(JSONObject jsonObject) throws IOException, DescriptorValidationException  {
+        JSONArray jsonArray = new JSONArray();
+        jsonArray.put(jsonObject);
+        
+        // Append asynchronously for increased throughput.
+        ApiFuture<AppendRowsResponse> future = streamWriter.append(jsonArray);
+        ApiFutures.addCallback(future, new AppendCompleteCallback(), MoreExecutors.directExecutor());
+        inflightRequestCount.register();
+    }
+
+    @PreDestroy
+    public void cleanup() throws IOException {
+        inflightRequestCount.arriveAndAwaitAdvance();
+        streamWriter.close();
+        client.close();
+    }
+
+    private class AppendCompleteCallback implements ApiFutureCallback<AppendRowsResponse> {
+        public void onSuccess(AppendRowsResponse response) {
+            System.out.format("Append success\n");
+            inflightRequestCount.arriveAndDeregister();
+        }
+
+        public void onFailure(Throwable throwable) {
+            // Handle the error appropriately (log it, retry, etc.)
+            System.err.println("Append failed: " + throwable.getMessage());
+            inflightRequestCount.arriveAndDeregister();
         }
     }
 }
