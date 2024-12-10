@@ -96,11 +96,13 @@ public class BigQueryService {
     }
 
     private class AppendCompleteCallback implements ApiFutureCallback<AppendRowsResponse> {
+        @Override
         public void onSuccess(AppendRowsResponse response) {
             System.out.format("Append success\n");
             inflightRequestCount.arriveAndDeregister();
         }
 
+        @Override
         public void onFailure(Throwable throwable) {
             // Handle the error appropriately (log it, retry, etc.)
             System.err.println("Append failed: " + throwable.getMessage());
