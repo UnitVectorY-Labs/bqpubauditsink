@@ -13,7 +13,7 @@ RUN mvn clean package -DskipTests -ntp && \
   mv /app/target/*.jar /app/build/
 
 # Stage 2: Run the application
-FROM gcr.io/distroless/java17-debian12
+FROM gcr.io/distroless/java17-debian13
 WORKDIR /app
 COPY --from=build /app/build/*.jar app.jar
 EXPOSE 8080
