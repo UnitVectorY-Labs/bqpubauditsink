@@ -1,6 +1,9 @@
 # Stage 1: Build the application
 FROM maven:3.9-amazoncorretto-17 AS build
 
+# Build argument for version injection
+ARG VERSION=dev
+
 WORKDIR /app
 
 # Copy your project files
