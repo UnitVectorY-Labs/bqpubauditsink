@@ -43,6 +43,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>17</java.version>
         <maven.compiler.release>17</maven.compiler.release>
+        <!-- Keep inherited Jackson dependencies on a patched, aligned release. -->
+        <jackson-bom.version>2.21.8</jackson-bom.version>
     </properties>
 
     <dependencyManagement>
